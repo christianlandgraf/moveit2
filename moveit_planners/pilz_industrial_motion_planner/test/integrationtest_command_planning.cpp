@@ -129,16 +129,16 @@ TEST_F(IntegrationTestCommandPlanning, PtpJoint)
   auto ptp{ test_data_->getPtpJoint("Ptp1") };
 
   moveit_msgs::GetMotionPlan srv;
-  moveit_msgs::MotionPlanRequest req = ptp.toRequest();
+  moveit_msgs::msg::MotionPlanRequest req = ptp.toRequest();
   srv.request.motion_plan_request = req;
 
   ros::ServiceClient client = node_handle.serviceClient<moveit_msgs::GetMotionPlan>(PLAN_SERVICE_NAME);
 
   ASSERT_TRUE(client.call(srv));
-  const moveit_msgs::MotionPlanResponse& response{ srv.response.motion_plan_response };
+  const moveit_msgs::msg::MotionPlanResponse& response{ srv.response.motion_plan_response };
 
   // Check the result
-  ASSERT_EQ(moveit_msgs::MoveItErrorCodes::SUCCESS, response.error_code.val) << "Planning failed!";
+  ASSERT_EQ(moveit_msgs::msg::MoveItErrorCodes::SUCCESS, response.error_code.val) << "Planning failed!";
   trajectory_msgs::JointTrajectory trajectory = response.trajectory.joint_trajectory;
 
   EXPECT_EQ(trajectory.joint_names.size(), num_joints_) << "Wrong number of jointnames";
@@ -186,10 +186,10 @@ TEST_F(IntegrationTestCommandPlanning, PtpJointCart)
   ros::ServiceClient client = node_handle.serviceClient<moveit_msgs::GetMotionPlan>(PLAN_SERVICE_NAME);
 
   ASSERT_TRUE(client.call(srv));
-  const moveit_msgs::MotionPlanResponse& response{ srv.response.motion_plan_response };
+  const moveit_msgs::msg::MotionPlanResponse& response{ srv.response.motion_plan_response };
 
   // Make sure the planning succeeded
-  ASSERT_EQ(moveit_msgs::MoveItErrorCodes::SUCCESS, response.error_code.val) << "Planning failed!";
+  ASSERT_EQ(moveit_msgs::msg::MoveItErrorCodes::SUCCESS, response.error_code.val) << "Planning failed!";
 
   // Check the result
   trajectory_msgs::JointTrajectory trajectory = response.trajectory.joint_trajectory;
@@ -251,9 +251,9 @@ TEST_F(IntegrationTestCommandPlanning, LinJoint)
   ros::ServiceClient client = node_handle.serviceClient<moveit_msgs::GetMotionPlan>(PLAN_SERVICE_NAME);
 
   ASSERT_TRUE(client.call(srv));
-  const moveit_msgs::MotionPlanResponse& response{ srv.response.motion_plan_response };
+  const moveit_msgs::msg::MotionPlanResponse& response{ srv.response.motion_plan_response };
 
-  ASSERT_EQ(moveit_msgs::MoveItErrorCodes::SUCCESS, response.error_code.val) << "Planning failed!";
+  ASSERT_EQ(moveit_msgs::msg::MoveItErrorCodes::SUCCESS, response.error_code.val) << "Planning failed!";
 
   std::cout << "++++++++++" << std::endl;
   std::cout << "+ Step 2 +" << std::endl;
@@ -302,9 +302,9 @@ TEST_F(IntegrationTestCommandPlanning, LinJointCart)
   ros::ServiceClient client = node_handle.serviceClient<moveit_msgs::GetMotionPlan>(PLAN_SERVICE_NAME);
 
   ASSERT_TRUE(client.call(srv));
-  const moveit_msgs::MotionPlanResponse& response{ srv.response.motion_plan_response };
+  const moveit_msgs::msg::MotionPlanResponse& response{ srv.response.motion_plan_response };
 
-  ASSERT_EQ(moveit_msgs::MoveItErrorCodes::SUCCESS, response.error_code.val) << "Planning failed!";
+  ASSERT_EQ(moveit_msgs::msg::MoveItErrorCodes::SUCCESS, response.error_code.val) << "Planning failed!";
 
   std::cout << "++++++++++" << std::endl;
   std::cout << "+ Step 2 +" << std::endl;
@@ -341,7 +341,7 @@ TEST_F(IntegrationTestCommandPlanning, CircJointCenterCart)
 
   CircJointCenterCart circ{ test_data_->getCircJointCenterCart("circ1_center_2") };
 
-  moveit_msgs::MotionPlanRequest req{ circ.toRequest() };
+  moveit_msgs::msg::MotionPlanRequest req{ circ.toRequest() };
 
   moveit_msgs::GetMotionPlan srv;
   srv.request.motion_plan_request = req;
@@ -349,10 +349,10 @@ TEST_F(IntegrationTestCommandPlanning, CircJointCenterCart)
   ros::ServiceClient client = node_handle.serviceClient<moveit_msgs::GetMotionPlan>(PLAN_SERVICE_NAME);
 
   ASSERT_TRUE(client.call(srv));
-  const moveit_msgs::MotionPlanResponse& response{ srv.response.motion_plan_response };
+  const moveit_msgs::msg::MotionPlanResponse& response{ srv.response.motion_plan_response };
 
   // Check the result
-  ASSERT_EQ(moveit_msgs::MoveItErrorCodes::SUCCESS, response.error_code.val) << "Planning failed!";
+  ASSERT_EQ(moveit_msgs::msg::MoveItErrorCodes::SUCCESS, response.error_code.val) << "Planning failed!";
   trajectory_msgs::JointTrajectory trajectory = response.trajectory.joint_trajectory;
 
   EXPECT_EQ(trajectory.joint_names.size(), num_joints_) << "Wrong number of jointnames";
@@ -425,17 +425,17 @@ TEST_F(IntegrationTestCommandPlanning, CircCartCenterCart)
   ros::NodeHandle node_handle("~");
 
   CircCenterCart circ{ test_data_->getCircCartCenterCart("circ1_center_2") };
-  moveit_msgs::MotionPlanRequest req{ circ.toRequest() };
+  moveit_msgs::msg::MotionPlanRequest req{ circ.toRequest() };
   moveit_msgs::GetMotionPlan srv;
   srv.request.motion_plan_request = req;
 
   ros::ServiceClient client = node_handle.serviceClient<moveit_msgs::GetMotionPlan>(PLAN_SERVICE_NAME);
 
   ASSERT_TRUE(client.call(srv));
-  const moveit_msgs::MotionPlanResponse& response = srv.response.motion_plan_response;
+  const moveit_msgs::msg::MotionPlanResponse& response = srv.response.motion_plan_response;
 
   // Check the result
-  ASSERT_EQ(moveit_msgs::MoveItErrorCodes::SUCCESS, response.error_code.val) << "Planning failed!";
+  ASSERT_EQ(moveit_msgs::msg::MoveItErrorCodes::SUCCESS, response.error_code.val) << "Planning failed!";
   trajectory_msgs::JointTrajectory trajectory = response.trajectory.joint_trajectory;
 
   EXPECT_EQ(trajectory.joint_names.size(), num_joints_) << "Wrong number of jointnames";
