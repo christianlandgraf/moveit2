@@ -57,26 +57,28 @@ bool ServoSolver::initialize(const rclcpp::Node::SharedPtr& node,
   node_handle_ = node;
   replan_ = false;
   feedback_send_ = false;
-  joint_cmd_pub_ = node_handle_->create_publisher<control_msgs::msg::JointJog>("servo_demo_node/delta_joint_cmds", 10);
+  joint_cmd_pub_ = node_handle_->create_publisher<control_msgs::msg::JointJog>("~/delta_joint_cmds", 10);
+  twist_cmd_pub_ = node_handle_->create_publisher<geometry_msgs::msg::TwistStamped>("~/delta_twist_cmds", 10);
 
   traj_cmd_pub_ = node_handle_->create_publisher<trajectory_msgs::msg::JointTrajectory>(
       "/joint_trajectory_controller/joint_trajectory", 10);
 
   // Get Servo Parameters
-  auto servo_parameters = moveit_servo::ServoParameters::makeServoParameters(node_handle_, LOGGER);
-  if (!servo_parameters)
+  servo_parameters_ = moveit_servo::ServoParameters::makeServoParameters(node_handle_, LOGGER);
+  if (!servo_parameters_)
   {
     RCLCPP_FATAL(LOGGER, "Failed to load the servo parameters");
     return false;
   }
 
   // Create Servo and start it
-  servo_ = std::make_unique<moveit_servo::Servo>(node_handle_, servo_parameters, planning_scene_monitor_);
+  servo_ = std::make_unique<moveit_servo::Servo>(node_handle_, servo_parameters_, planning_scene_monitor_);
   servo_->start();
 
   // Create publisher to send servo commands
   joint_cmd_pub_ =
-      node_handle_->create_publisher<control_msgs::msg::JointJog>(servo_parameters->joint_command_in_topic, 1);
+      node_handle_->create_publisher<control_msgs::msg::JointJog>(
+    servo_parameters_->joint_command_in_topic, 1);
 
   // Subscribe to the collision_check topic
   collision_velocity_scale_sub_ = node_handle_->create_subscription<std_msgs::msg::Float64>(
@@ -113,11 +115,11 @@ ServoSolver::solve(const robot_trajectory::RobotTrajectory& local_trajectory,
   moveit_msgs::msg::RobotTrajectory robot_command;
   local_trajectory.getRobotTrajectoryMsg(robot_command);
 
-  if (publish_ || replan_)
-  {
-    traj_cmd_pub_->publish(robot_command.joint_trajectory);
-    publish_ = false;
-  }
+  // if (publish_ || replan_)
+  // {
+  //   traj_cmd_pub_->publish(robot_command.joint_trajectory);
+  //   publish_ = false;
+  // }
 
   // Replan if velocity scaling is below threshold
   if (replan_)
@@ -138,6 +140,42 @@ ServoSolver::solve(const robot_trajectory::RobotTrajectory& local_trajectory,
   {
     feedback_send_ = false;
   }
+
+  auto msg = std::make_unique<geometry_msgs::msg::TwistStamped>();
+  msg->header.stamp = node_handle_->now();
+
+  RCLCPP_ERROR(LOGGER, "make Twist");
+
+  if (!robot_command.joint_trajectory.points.empty())
+  {
+      RCLCPP_ERROR(LOGGER, "fill Twist");
+
+  const auto current_state = planning_scene_monitor_->getStateMonitor()->getCurrentState();
+  moveit::core::RobotState target_state(local_trajectory.getRobotModel());
+  target_state.setVariablePositions(robot_command.joint_trajectory.joint_names, robot_command.joint_trajectory.points[0].positions);
+  target_state.update();
+
+  Eigen::Isometry3d current_pose = current_state->getFrameTransform(
+servo_parameters_->robot_link_command_frame);
+  Eigen::Isometry3d target_pose = target_state.getFrameTransform(
+servo_parameters_->robot_link_command_frame);
+
+  Eigen::Isometry3d diff_pose = current_pose.inverse() * target_pose;
+  Eigen::Vector3d diff_eulers = Eigen::Matrix3d(diff_pose.linear()).eulerAngles(0, 1, 2);
+
+  constexpr double fixed_vel = 0.05;
+  const double vel_scale = fixed_vel / diff_pose.translation().norm();
+
+  msg->twist.linear.x = diff_pose.translation().x() * vel_scale;
+  msg->twist.linear.y = diff_pose.translation().y() * vel_scale;
+  msg->twist.linear.z = diff_pose.translation().z() * vel_scale;
+  msg->twist.angular.x = diff_eulers.x() * vel_scale;
+  msg->twist.angular.y = diff_eulers.y() * vel_scale;
+  msg->twist.angular.z = diff_eulers.z() * vel_scale;
+  }
+      RCLCPP_ERROR(LOGGER, "publish Twist");
+
+  twist_cmd_pub_->publish(std::move(msg));
 
   // auto msg = std::make_unique<control_msgs::msg::JointJog>();
   // msg->header.stamp = node_handle_->now();

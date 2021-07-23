@@ -64,7 +64,7 @@ private:
   rclcpp::Node::SharedPtr node_handle_;
   planning_scene_monitor::PlanningSceneMonitorPtr planning_scene_monitor_;
 
-  moveit_servo::ServoParameters::SharedConstPtr servo_parameters;
+  moveit_servo::ServoParameters::SharedConstPtr servo_parameters_;
   double velocity_scaling_threshold_;  // Indicates below which velocity scaling replanning should be triggered
 
   // Servo cpp interface
@@ -72,6 +72,8 @@ private:
 
   // Inteface to communicate with servo
   rclcpp::Publisher<control_msgs::msg::JointJog>::SharedPtr joint_cmd_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr twist_cmd_pub_;
+
   rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr traj_cmd_pub_;
   bool publish_ = true;
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr collision_velocity_scale_sub_;
