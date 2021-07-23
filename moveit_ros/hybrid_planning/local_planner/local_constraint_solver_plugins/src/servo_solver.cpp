@@ -139,11 +139,11 @@ ServoSolver::solve(const robot_trajectory::RobotTrajectory& local_trajectory,
     feedback_send_ = false;
   }
 
-  auto msg = std::make_unique<control_msgs::msg::JointJog>();
-  msg->header.stamp = node_handle_->now();
-  msg->joint_names = robot_command.joint_trajectory.joint_names;
-  msg->velocities = robot_command.joint_trajectory.points[0].velocities;
-  joint_cmd_pub_->publish(std::move(msg));
+  // auto msg = std::make_unique<control_msgs::msg::JointJog>();
+  // msg->header.stamp = node_handle_->now();
+  // msg->joint_names = robot_command.joint_trajectory.joint_names;
+  // msg->velocities = robot_command.joint_trajectory.points[0].velocities;
+  // joint_cmd_pub_->publish(std::move(msg));
   return feedback_result;
 }
 }  // namespace moveit_hybrid_planning
