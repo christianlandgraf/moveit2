@@ -77,8 +77,7 @@ bool ServoSolver::initialize(const rclcpp::Node::SharedPtr& node,
 
   // Create publisher to send servo commands
   joint_cmd_pub_ =
-      node_handle_->create_publisher<control_msgs::msg::JointJog>(
-    servo_parameters_->joint_command_in_topic, 1);
+      node_handle_->create_publisher<control_msgs::msg::JointJog>(servo_parameters_->joint_command_in_topic, 1);
 
   // Subscribe to the collision_check topic
   collision_velocity_scale_sub_ = node_handle_->create_subscription<std_msgs::msg::Float64>(
@@ -105,8 +104,8 @@ bool ServoSolver::reset()
 
 moveit_msgs::action::LocalPlanner::Feedback
 ServoSolver::solve(const robot_trajectory::RobotTrajectory& local_trajectory,
-        const std::shared_ptr<const moveit_msgs::action::LocalPlanner::Goal> local_goal,
-        trajectory_msgs::msg::JointTrajectory& local_solution)
+                   const std::shared_ptr<const moveit_msgs::action::LocalPlanner::Goal> local_goal,
+                   trajectory_msgs::msg::JointTrajectory& local_solution)
 {
   // Create Feedback
   moveit_msgs::action::LocalPlanner::Feedback feedback_result;
@@ -144,36 +143,30 @@ ServoSolver::solve(const robot_trajectory::RobotTrajectory& local_trajectory,
   auto msg = std::make_unique<geometry_msgs::msg::TwistStamped>();
   msg->header.stamp = node_handle_->now();
 
-  RCLCPP_ERROR(LOGGER, "make Twist");
-
   if (!robot_command.joint_trajectory.points.empty())
   {
-      RCLCPP_ERROR(LOGGER, "fill Twist");
+    const auto current_state = planning_scene_monitor_->getStateMonitor()->getCurrentState();
+    moveit::core::RobotState target_state(local_trajectory.getRobotModel());
+    target_state.setVariablePositions(robot_command.joint_trajectory.joint_names,
+                                      robot_command.joint_trajectory.points[0].positions);
+    target_state.update();
 
-  const auto current_state = planning_scene_monitor_->getStateMonitor()->getCurrentState();
-  moveit::core::RobotState target_state(local_trajectory.getRobotModel());
-  target_state.setVariablePositions(robot_command.joint_trajectory.joint_names, robot_command.joint_trajectory.points[0].positions);
-  target_state.update();
+    Eigen::Isometry3d current_pose = current_state->getFrameTransform(servo_parameters_->robot_link_command_frame);
+    Eigen::Isometry3d target_pose = target_state.getFrameTransform(servo_parameters_->robot_link_command_frame);
 
-  Eigen::Isometry3d current_pose = current_state->getFrameTransform(
-servo_parameters_->robot_link_command_frame);
-  Eigen::Isometry3d target_pose = target_state.getFrameTransform(
-servo_parameters_->robot_link_command_frame);
+    Eigen::Isometry3d diff_pose = current_pose.inverse() * target_pose;
+    Eigen::Vector3d diff_eulers = Eigen::Matrix3d(diff_pose.linear()).eulerAngles(0, 1, 2);
 
-  Eigen::Isometry3d diff_pose = current_pose.inverse() * target_pose;
-  Eigen::Vector3d diff_eulers = Eigen::Matrix3d(diff_pose.linear()).eulerAngles(0, 1, 2);
+    constexpr double fixed_vel = 0.05;
+    const double vel_scale = fixed_vel / diff_pose.translation().norm();
 
-  constexpr double fixed_vel = 0.05;
-  const double vel_scale = fixed_vel / diff_pose.translation().norm();
-
-  msg->twist.linear.x = diff_pose.translation().x() * vel_scale;
-  msg->twist.linear.y = diff_pose.translation().y() * vel_scale;
-  msg->twist.linear.z = diff_pose.translation().z() * vel_scale;
-  msg->twist.angular.x = diff_eulers.x() * vel_scale;
-  msg->twist.angular.y = diff_eulers.y() * vel_scale;
-  msg->twist.angular.z = diff_eulers.z() * vel_scale;
+    msg->twist.linear.x = diff_pose.translation().x() * vel_scale;
+    msg->twist.linear.y = diff_pose.translation().y() * vel_scale;
+    msg->twist.linear.z = diff_pose.translation().z() * vel_scale;
+    msg->twist.angular.x = diff_eulers.x() * vel_scale;
+    msg->twist.angular.y = diff_eulers.y() * vel_scale;
+    msg->twist.angular.z = diff_eulers.z() * vel_scale;
   }
-      RCLCPP_ERROR(LOGGER, "publish Twist");
 
   twist_cmd_pub_->publish(std::move(msg));
 
