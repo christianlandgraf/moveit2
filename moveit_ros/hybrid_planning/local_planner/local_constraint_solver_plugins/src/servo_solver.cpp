@@ -151,11 +151,14 @@ ServoSolver::solve(const robot_trajectory::RobotTrajectory& local_trajectory,
                                       robot_command.joint_trajectory.points[0].positions);
     target_state.update();
 
+    // TF planning_frame -> current EE
     Eigen::Isometry3d current_pose = current_state->getFrameTransform(servo_parameters_->robot_link_command_frame);
+    // TF planning -> target EE
     Eigen::Isometry3d target_pose = target_state.getFrameTransform(servo_parameters_->robot_link_command_frame);
 
+    // current EE -> planning frame * planning frame -> target EE
     Eigen::Isometry3d diff_pose = current_pose.inverse() * target_pose;
-    Eigen::Vector3d diff_eulers = Eigen::Matrix3d(diff_pose.linear()).eulerAngles(0, 1, 2);
+    Eigen::AngleAxisd axis_angle(diff_pose.linear());
 
     constexpr double fixed_vel = 0.05;
     const double vel_scale = fixed_vel / diff_pose.translation().norm();
@@ -163,9 +166,9 @@ ServoSolver::solve(const robot_trajectory::RobotTrajectory& local_trajectory,
     msg->twist.linear.x = diff_pose.translation().x() * vel_scale;
     msg->twist.linear.y = diff_pose.translation().y() * vel_scale;
     msg->twist.linear.z = diff_pose.translation().z() * vel_scale;
-    msg->twist.angular.x = diff_eulers.x() * vel_scale;
-    msg->twist.angular.y = diff_eulers.y() * vel_scale;
-    msg->twist.angular.z = diff_eulers.z() * vel_scale;
+    msg->twist.angular.x = axis_angle.axis().x() * axis_angle.angle() * vel_scale;
+    msg->twist.angular.y = axis_angle.axis().y() * axis_angle.angle() * vel_scale;
+    msg->twist.angular.z = axis_angle.axis().z() * axis_angle.angle() * vel_scale;
   }
 
   twist_cmd_pub_->publish(std::move(msg));
