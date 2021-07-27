@@ -102,7 +102,10 @@ SimpleSampler::getLocalTrajectory(const moveit::core::RobotState& current_state,
     moveit::core::RobotState next_desired_goal_state = reference_trajectory_->getWayPoint(next_waypoint_index_);
 
     // Check if state reached
-    if (next_desired_goal_state.distance(current_state) <= 0.1)
+    auto sum_joint_distance = next_desired_goal_state.distance(current_state);
+    double last_joint_distance = fabs(current_state.getVariablePosition("wrist_3_joint") - next_desired_goal_state.getVariablePosition("wrist_3_joint"));
+    double distance_minus_last_joint = sum_joint_distance - last_joint_distance;
+    if (distance_minus_last_joint <= 0.1)
     {
       // Update index (and thus desired robot state)
       next_waypoint_index_ += 1;
