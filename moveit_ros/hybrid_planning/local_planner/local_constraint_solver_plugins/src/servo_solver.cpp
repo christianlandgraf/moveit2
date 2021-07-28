@@ -59,6 +59,7 @@ bool ServoSolver::initialize(const rclcpp::Node::SharedPtr& node,
   feedback_send_ = false;
   joint_cmd_pub_ = node_handle_->create_publisher<control_msgs::msg::JointJog>("~/delta_joint_cmds", 10);
   twist_cmd_pub_ = node_handle_->create_publisher<geometry_msgs::msg::TwistStamped>("~/delta_twist_cmds", 10);
+  ee_tf_pub_ = node_handle_->create_publisher<geometry_msgs::msg::TransformStamped>("~/eef_position", 10);
 
   traj_cmd_pub_ = node_handle_->create_publisher<trajectory_msgs::msg::JointTrajectory>(
       "/joint_trajectory_controller/joint_trajectory", 10);
@@ -90,6 +91,20 @@ bool ServoSolver::initialize(const rclcpp::Node::SharedPtr& node,
         else
         {
           replan_ = false;
+        }
+      });
+
+  laser_corrections_sub_ = node_handle_->create_subscription<control_msgs::msg::JointJog>(
+      "~/delta_joint_laser_corrections", 2, [this](const control_msgs::msg::JointJog::SharedPtr msg) {
+        auto joint_names = msg.get()->joint_names;
+        auto joint_vels = msg.get()->velocities;
+        if (joint_names.empty() || joint_vels.empty())
+        {
+          laser_correction_ = 0;
+        }
+        else
+        {
+          laser_correction_ = joint_vels.at(0);
         }
       });
 
@@ -168,10 +183,17 @@ ServoSolver::solve(const robot_trajectory::RobotTrajectory& local_trajectory,
     msg->twist.linear.z = diff_pose.translation().z() * vel_scale;
     msg->twist.angular.x = axis_angle.axis().x() * axis_angle.angle() * vel_scale;
     msg->twist.angular.y = axis_angle.axis().y() * axis_angle.angle() * vel_scale;
-    msg->twist.angular.z = axis_angle.axis().z() * axis_angle.angle() * vel_scale;
+
+    // Rotation joint is laser correction, not from delta-position
+    msg->twist.angular.z = laser_correction_;
   }
 
   twist_cmd_pub_->publish(std::move(msg));
+
+  // Publish EEF Position
+  geometry_msgs::msg::TransformStamped tf;
+  if (servo_->getEEFrameTransform(tf))
+    ee_tf_pub_->publish(tf);
 
   // auto msg = std::make_unique<control_msgs::msg::JointJog>();
   // msg->header.stamp = node_handle_->now();
