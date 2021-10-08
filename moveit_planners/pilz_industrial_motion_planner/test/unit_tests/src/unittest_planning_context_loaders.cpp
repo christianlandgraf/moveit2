@@ -46,8 +46,9 @@
 
 #include "test_utils.h"
 
-const std::string PARAM_MODEL_NO_GRIPPER_NAME{ "robot_description" };
-const std::string PARAM_MODEL_WITH_GRIPPER_NAME{ "robot_description_pg70" };
+#include "rclcpp/rclcpp.hpp"
+
+static const rclcpp::Logger LOGGER = rclcpp::get_logger("unittest_planning_context_loader");
 
 class PlanningContextLoadersTest : public ::testing::TestWithParam<std::vector<std::string>>
 {
@@ -60,6 +61,15 @@ protected:
    */
   void SetUp() override
   {
+    rclcpp::NodeOptions node_options;
+    node_options.automatically_declare_parameters_from_overrides(true);
+    node_ = rclcpp::Node::make_shared("unittest_planning_context_loader", node_options);
+
+    // load robot model
+    rdf_loader::RDFLoader rdf_loader(node_, "robot_description");
+    moveit::core::RobotModelConstPtr robot_model_ =
+        std::make_shared<moveit::core::RobotModel>(rdf_loader.getURDF(), rdf_loader.getSRDF());
+
     ASSERT_FALSE(robot_model_ == nullptr) << "There is no robot model!";
 
     // Load the plugin
@@ -71,7 +81,7 @@ protected:
     }
     catch (pluginlib::PluginlibException& ex)
     {
-      ROS_FATAL_STREAM("Exception while creating planning context loader " << ex.what());
+      RCLCPP_FATAL_STREAM(LOGGER, "Exception while creating planning context loader " << ex.what());
       FAIL();
     }
 
@@ -96,8 +106,8 @@ protected:
   }
 
 protected:
-  ros::NodeHandle ph_{ "~" };
-  robot_model::RobotModelConstPtr robot_model_{ robot_model_loader::RobotModelLoader(GetParam().back()).getModel() };
+  rclcpp::Node::SharedPtr node_;
+  moveit::core::RobotModelConstPtr robot_model_;
 
   // Load the plugin
   boost::scoped_ptr<pluginlib::ClassLoader<pilz_industrial_motion_planner::PlanningContextLoader>>
@@ -110,19 +120,12 @@ protected:
 // ContextLoader you want to test
 INSTANTIATE_TEST_SUITE_P(
     InstantiationName, PlanningContextLoadersTest,
-    ::testing::Values(std::vector<std::string>{ "pilz_industrial_motion_planner::PlanningContextLoaderPTP", "PTP",
-                                                PARAM_MODEL_NO_GRIPPER_NAME },  // Test for PTP
-                      std::vector<std::string>{ "pilz_industrial_motion_planner::PlanningContextLoaderPTP", "PTP",
-                                                PARAM_MODEL_WITH_GRIPPER_NAME },  // Test for PTP
-                      std::vector<std::string>{ "pilz_industrial_motion_planner::PlanningContextLoaderLIN", "LIN",
-                                                PARAM_MODEL_NO_GRIPPER_NAME },  // Test for LIN
-                      std::vector<std::string>{ "pilz_industrial_motion_planner::PlanningContextLoaderLIN", "LIN",
-                                                PARAM_MODEL_WITH_GRIPPER_NAME },  // Test for LIN
-                      std::vector<std::string>{ "pilz_industrial_motion_planner::PlanningContextLoaderCIRC", "CIRC",
-                                                PARAM_MODEL_NO_GRIPPER_NAME },  // Test for CIRC
-                      std::vector<std::string>{ "pilz_industrial_motion_planner::PlanningContextLoaderCIRC", "CIRC",
-                                                PARAM_MODEL_WITH_GRIPPER_NAME }  // Test for CIRC
-                      ));
+    ::testing::Values(
+        std::vector<std::string>{ "pilz_industrial_motion_planner::PlanningContextLoaderPTP", "PTP" },  // Test for PTP
+        std::vector<std::string>{ "pilz_industrial_motion_planner::PlanningContextLoaderLIN", "LIN" },  // Test for LIN
+        std::vector<std::string>{ "pilz_industrial_motion_planner::PlanningContextLoaderCIRC", "CIRC" }
+        // Test for CIRC
+        ));
 
 /**
  * @brief Test getAlgorithm returns PTP
@@ -130,7 +133,7 @@ INSTANTIATE_TEST_SUITE_P(
 TEST_P(PlanningContextLoadersTest, GetAlgorithm)
 {
   std::string alg = planning_context_loader_->getAlgorithm();
-  EXPECT_EQ(alg, GetParam().at(1));
+  EXPECT_EQ(alg, GetParam().back());
 }
 
 /**
@@ -173,7 +176,7 @@ TEST_P(PlanningContextLoadersTest, LoadContext)
 
 int main(int argc, char** argv)
 {
-  ros::init(argc, argv, "unittest_planning_context_loaders");
+  rclcpp::init(argc, argv);
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

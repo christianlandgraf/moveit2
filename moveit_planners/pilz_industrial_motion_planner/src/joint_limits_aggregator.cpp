@@ -51,9 +51,8 @@ pilz_industrial_motion_planner::JointLimitsAggregator::getAggregatedLimits(
     const std::vector<const moveit::core::JointModel*>& joint_models)
 {
   JointLimitsContainer container;
-  // TODO(henningkayser): use param_namespace
 
-  RCLCPP_INFO_STREAM(LOGGER, "Reading limits from namespace " << node->get_namespace());
+  RCLCPP_INFO_STREAM(LOGGER, "Reading limits from namespace " << param_namespace);
 
   // Iterate over all joint models and generate the map
   for (auto joint_model : joint_models)
@@ -61,8 +60,8 @@ pilz_industrial_motion_planner::JointLimitsAggregator::getAggregatedLimits(
     JointLimit joint_limit;
 
     // If there is something defined for the joint in the node parameters
-    if (::joint_limits_interface::declare_parameters(joint_model->getName(), node) &&
-        joint_limits_interface::getJointLimits(joint_model->getName(), node, joint_limit))
+    if (::joint_limits_interface::declare_parameters(joint_model->getName(), param_namespace, node) &&
+        joint_limits_interface::getJointLimits(joint_model->getName(), param_namespace, node, joint_limit))
     {
       if (joint_limit.has_position_limits)
       {

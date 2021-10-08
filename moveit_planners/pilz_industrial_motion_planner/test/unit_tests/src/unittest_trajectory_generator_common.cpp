@@ -41,22 +41,19 @@
 #include <moveit/robot_model_loader/robot_model_loader.h>
 #include <moveit/robot_state/conversions.h>
 #include <moveit/robot_state/robot_state.h>
-#include <moveit_msgs/MoveItErrorCodes.h>
 
 #include "pilz_industrial_motion_planner/joint_limits_aggregator.h"
 #include "pilz_industrial_motion_planner/joint_limits_container.h"
 #include "pilz_industrial_motion_planner/trajectory_generator_circ.h"
 #include "pilz_industrial_motion_planner/trajectory_generator_lin.h"
 #include "pilz_industrial_motion_planner/trajectory_generator_ptp.h"
+#include "pilz_industrial_motion_planner/trajectory_blender_transition_window.h"
 
 #include "test_utils.h"
 
-const std::string PARAM_MODEL_NO_GRIPPER_NAME{ "robot_description" };
-const std::string PARAM_MODEL_WITH_GRIPPER_NAME{ "robot_description_pg70" };
+#include "rclcpp/rclcpp.hpp"
 
-// parameters from parameter server
-const std::string PARAM_PLANNING_GROUP_NAME("planning_group");
-const std::string PARAM_TARGET_LINK_NAME("target_link");
+static const std::string PARAM_NAMESPACE_LIMITS = "robot_description_planning";
 
 /**
  * A value type container to combine type and value
@@ -99,16 +96,28 @@ class TrajectoryGeneratorCommonTest : public ::testing::Test
 protected:
   void SetUp() override
   {
-    ASSERT_TRUE(ph_.getParam(PARAM_PLANNING_GROUP_NAME, planning_group_));
-    ASSERT_TRUE(ph_.getParam(PARAM_TARGET_LINK_NAME, target_link_));
+    rclcpp::NodeOptions node_options;
+    node_options.automatically_declare_parameters_from_overrides(true);
+    node_ = rclcpp::Node::make_shared("unittest_trajectory_generator_common", node_options);
+
+    // load robot model
+    rdf_loader::RDFLoader rdf_loader(node_, "robot_description");
+    moveit::core::RobotModelConstPtr robot_model_ =
+        std::make_shared<moveit::core::RobotModel>(rdf_loader.getURDF(), rdf_loader.getSRDF());
+    ASSERT_TRUE(bool(robot_model_)) << "Failed to load robot model";
+
+    // get parameters
+    ASSERT_TRUE(node_->has_parameter("planning_group"));
+    node_->get_parameter<std::string>("planning_group", planning_group_);
+    ASSERT_TRUE(node_->has_parameter("target_link"));
+    node_->get_parameter<std::string>("target_link", target_link_);
 
     testutils::checkRobotModel(robot_model_, planning_group_, target_link_);
 
     // create the limits container
-    std::string robot_description_param = (!T::VALUE ? PARAM_MODEL_NO_GRIPPER_NAME : PARAM_MODEL_WITH_GRIPPER_NAME);
     pilz_industrial_motion_planner::JointLimitsContainer joint_limits =
         pilz_industrial_motion_planner::JointLimitsAggregator::getAggregatedLimits(
-            ros::NodeHandle(robot_description_param + "_planning"), robot_model_->getActiveJointModels());
+            node_, PARAM_NAMESPACE_LIMITS, robot_model_->getActiveJointModels());
     pilz_industrial_motion_planner::CartesianLimit cart_limits;
     cart_limits.setMaxRotationalVelocity(0.5 * M_PI);
     cart_limits.setMaxTranslationalAcceleration(2);
@@ -127,7 +136,7 @@ protected:
     req_.group_name = planning_group_;
     req_.max_velocity_scaling_factor = 1.0;
     req_.max_acceleration_scaling_factor = 1.0;
-    robot_state::RobotState rstate(robot_model_);
+    moveit::core::RobotState rstate(robot_model_);
     rstate.setToDefaultValues();
     rstate.setJointGroupPositions(planning_group_, { 0, M_PI / 2, 0, M_PI / 2, 0, 0 });
     rstate.setVariableVelocities(std::vector<double>(rstate.getVariableCount(), 0.0));
@@ -142,11 +151,11 @@ protected:
 
 protected:
   // ros stuff
-  ros::NodeHandle ph_{ "~" };
-  robot_model::RobotModelConstPtr robot_model_{
-    robot_model_loader::RobotModelLoader(!T::VALUE ? PARAM_MODEL_NO_GRIPPER_NAME : PARAM_MODEL_WITH_GRIPPER_NAME)
-        .getModel()
-  };
+  rclcpp::Node::SharedPtr node_;
+  moveit::core::RobotModelConstPtr robot_model_;
+
+  std::unique_ptr<TrajectoryGenerator> lin_generator_;
+  std::unique_ptr<TrajectoryBlenderTransitionWindow> blender_;
 
   // trajectory generator
   std::unique_ptr<pilz_industrial_motion_planner::TrajectoryGenerator> trajectory_generator_;
@@ -301,8 +310,8 @@ TYPED_TEST(TrajectoryGeneratorCommonTest, EmptyGoalConstraints)
 TYPED_TEST(TrajectoryGeneratorCommonTest, MultipleGoals)
 {
   moveit_msgs::msg::JointConstraint joint_constraint;
-  moveit_msgs::PositionConstraint position_constraint;
-  moveit_msgs::OrientationConstraint orientation_constraint;
+  moveit_msgs::msg::PositionConstraint position_constraint;
+  moveit_msgs::msg::OrientationConstraint orientation_constraint;
   moveit_msgs::msg::Constraints goal_constraint;
 
   // two goal constraints
@@ -378,8 +387,8 @@ TYPED_TEST(TrajectoryGeneratorCommonTest, InvalideJointPositionInGoal)
  */
 TYPED_TEST(TrajectoryGeneratorCommonTest, InvalidLinkNameInCartesianGoal)
 {
-  moveit_msgs::PositionConstraint position_constraint;
-  moveit_msgs::OrientationConstraint orientation_constraint;
+  moveit_msgs::msg::PositionConstraint position_constraint;
+  moveit_msgs::msg::OrientationConstraint orientation_constraint;
   moveit_msgs::msg::Constraints goal_constraint;
   // link name not set
   goal_constraint.position_constraints.push_back(position_constraint);
@@ -410,8 +419,8 @@ TYPED_TEST(TrajectoryGeneratorCommonTest, InvalidLinkNameInCartesianGoal)
  */
 TYPED_TEST(TrajectoryGeneratorCommonTest, EmptyPrimitivePoses)
 {
-  moveit_msgs::PositionConstraint position_constraint;
-  moveit_msgs::OrientationConstraint orientation_constraint;
+  moveit_msgs::msg::PositionConstraint position_constraint;
+  moveit_msgs::msg::OrientationConstraint orientation_constraint;
   moveit_msgs::msg::Constraints goal_constraint;
   position_constraint.link_name =
       this->robot_model_->getJointModelGroup(this->planning_group_)->getLinkModelNames().back();
@@ -427,8 +436,7 @@ TYPED_TEST(TrajectoryGeneratorCommonTest, EmptyPrimitivePoses)
 
 int main(int argc, char** argv)
 {
-  ros::init(argc, argv, "unittest_trajectory_generator_common");
-  // ros::NodeHandle nh;
+  rclcpp::init(argc, argv);
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

@@ -44,16 +44,16 @@
 
 #include "rclcpp/rclcpp.hpp"
 
-const std::string PARAM_MODEL_NO_GRIPPER_NAME{ "robot_description" };
-const std::string PARAM_MODEL_WITH_GRIPPER_NAME{ "robot_description_pg70" };
-
 static const rclcpp::Logger LOGGER = rclcpp::get_logger("unittest_pilz_industrial_motion_planner");
 
-class CommandPlannerTest : public testing::TestWithParam<std::string>
+class CommandPlannerTest : public testing::Test
 {
 protected:
   void SetUp() override
   {
+    rclcpp::NodeOptions node_options;
+    node_options.automatically_declare_parameters_from_overrides(true);
+    node_ = rclcpp::Node::make_shared("unittest_pilz_industrial_motion_planner", node_options);
     createPlannerInstance();
   }
 
@@ -68,17 +68,15 @@ protected:
    */
   void createPlannerInstance()
   {
-    std::cout << "Tres";
-    // Load planner name from parameter server
-    if (!node_->has_parameter("planning_plugin"))
-    {
-      RCLCPP_FATAL_STREAM(LOGGER, "Could not find planner plugin name");
-      FAIL();
-    }
-    else {
-      node_->get_parameter<std::string>("planning_plugin", planner_plugin_name_);
-      std::cout << "Found: " << planner_plugin_name_.c_str();
-    }
+    // load robot model
+    rdf_loader::RDFLoader rdf_loader(node_, "robot_description");
+    moveit::core::RobotModelConstPtr robot_model_ =
+        std::make_shared<moveit::core::RobotModel>(rdf_loader.getURDF(), rdf_loader.getSRDF());
+    ASSERT_TRUE(bool(robot_model_)) << "Failed to load robot model";
+
+    // Load planner name from node parameters
+    ASSERT_TRUE(node_->has_parameter("planning_plugin")) << "Could not find parameter 'planning_plugin'";
+    node_->get_parameter<std::string>("planning_plugin", planner_plugin_name_);
 
     // Load the plugin
     try
@@ -91,20 +89,18 @@ protected:
       RCLCPP_FATAL_STREAM(LOGGER, "Exception while creating planning plugin loader " << ex.what());
       FAIL();
     }
-    std::cout << "Loaded planning plugin";
 
     // Create planner
     try
     {
       planner_instance_.reset(planner_plugin_loader_->createUnmanagedInstance(planner_plugin_name_));
-      ASSERT_TRUE(planner_instance_->initialize(robot_model_, node_, "robot_description_planning")) // TODO(sjahr) Namespace correct?
+      ASSERT_TRUE(planner_instance_->initialize(robot_model_, node_, "robot_description_planning"))
           << "Initialzing the planner instance failed.";
     }
     catch (pluginlib::PluginlibException& ex)
     {
       FAIL() << "Could not create planner " << ex.what() << "\n";
     }
-    std::cout << "Created planner";
   }
 
   void TearDown() override
@@ -115,37 +111,27 @@ protected:
 protected:
   // ros stuff
   rclcpp::Node::SharedPtr node_;
-  moveit::core::RobotModelConstPtr robot_model_{robot_model_loader::RobotModelLoader(node_, GetParam()).getModel() };
+  moveit::core::RobotModelConstPtr robot_model_;
 
   std::string planner_plugin_name_;
-
   std::unique_ptr<pluginlib::ClassLoader<planning_interface::PlannerManager>> planner_plugin_loader_;
-
   planning_interface::PlannerManagerPtr planner_instance_;
 };
-
-// Instantiate the test cases for robot model with and without gripper
-INSTANTIATE_TEST_SUITE_P(InstantiationName, CommandPlannerTest,
-                         ::testing::Values(PARAM_MODEL_NO_GRIPPER_NAME, PARAM_MODEL_WITH_GRIPPER_NAME));
 
 /**
  * @brief Test that PTP can be loaded
  * This needs to be extended with every new planning Algorithm
  */
-TEST_P(CommandPlannerTest, ObtainLoadedPlanningAlgorithms)
+TEST_F(CommandPlannerTest, ObtainLoadedPlanningAlgorithms)
 {
-  std::cout << "Quatre?";
   // Check for the algorithms
   std::vector<std::string> algs;
-
-  std::cout << "Check for the algorithms";
   planner_instance_->getPlanningAlgorithms(algs);
   ASSERT_EQ(3u, algs.size()) << "Found more or less planning algorithms as expected! Found:"
                              << ::testing::PrintToString(algs);
 
   // Collect the algorithms, check for uniqueness
   std::set<std::string> algs_set;
-  std::cout << "Check for the algorithms";
   for (const auto& alg : algs)
   {
     algs_set.insert(alg);
@@ -160,7 +146,7 @@ TEST_P(CommandPlannerTest, ObtainLoadedPlanningAlgorithms)
  * @brief Check that all announced planning algorithms can perform the service
  * request if the planner_id is set.
  */
-TEST_P(CommandPlannerTest, CheckValidAlgorithmsForServiceRequest)
+TEST_F(CommandPlannerTest, CheckValidAlgorithmsForServiceRequest)
 {
   // Check for the algorithms
   std::vector<std::string> algs;
@@ -179,7 +165,7 @@ TEST_P(CommandPlannerTest, CheckValidAlgorithmsForServiceRequest)
  * @brief Check that canServiceRequest(req) returns false if planner_id is not
  * supported
  */
-TEST_P(CommandPlannerTest, CheckInvalidAlgorithmsForServiceRequest)
+TEST_F(CommandPlannerTest, CheckInvalidAlgorithmsForServiceRequest)
 {
   planning_interface::MotionPlanRequest req;
   req.planner_id = "NON_EXISTEND_ALGORITHM_HASH_da39a3ee5e6b4b0d3255bfef95601890afd80709";
@@ -190,7 +176,7 @@ TEST_P(CommandPlannerTest, CheckInvalidAlgorithmsForServiceRequest)
 /**
  * @brief Check that canServiceRequest(req) returns false if planner_id is empty
  */
-TEST_P(CommandPlannerTest, CheckEmptyPlannerIdForServiceRequest)
+TEST_F(CommandPlannerTest, CheckEmptyPlannerIdForServiceRequest)
 {
   planning_interface::MotionPlanRequest req;
   req.planner_id = "";
@@ -201,7 +187,7 @@ TEST_P(CommandPlannerTest, CheckEmptyPlannerIdForServiceRequest)
 /**
  * @brief Check integrety against empty input
  */
-TEST_P(CommandPlannerTest, CheckPlanningContextRequestNull)
+TEST_F(CommandPlannerTest, CheckPlanningContextRequestNull)
 {
   moveit_msgs::msg::MotionPlanRequest req;
   moveit_msgs::msg::MoveItErrorCodes error_code;
@@ -212,7 +198,7 @@ TEST_P(CommandPlannerTest, CheckPlanningContextRequestNull)
  * @brief Check that for the announced algorithmns getPlanningContext does not
  * return nullptr
  */
-TEST_P(CommandPlannerTest, CheckPlanningContextRequest)
+TEST_F(CommandPlannerTest, CheckPlanningContextRequest)
 {
   moveit_msgs::msg::MotionPlanRequest req;
   moveit_msgs::msg::MoveItErrorCodes error_code;
@@ -232,7 +218,7 @@ TEST_P(CommandPlannerTest, CheckPlanningContextRequest)
 /**
  * @brief Check the description can be obtained and is not empty
  */
-TEST_P(CommandPlannerTest, CheckPlanningContextDescriptionNotEmptyAndStable)
+TEST_F(CommandPlannerTest, CheckPlanningContextDescriptionNotEmptyAndStable)
 {
   std::string desc = planner_instance_->getDescription();
   EXPECT_GT(desc.length(), 0u);
@@ -240,11 +226,7 @@ TEST_P(CommandPlannerTest, CheckPlanningContextDescriptionNotEmptyAndStable)
 
 int main(int argc, char** argv)
 {
-  std::cout << "Hello there\n";
-  testing::InitGoogleTest(&argc, argv);
   rclcpp::init(argc, argv);
-  std::cout << "Uno\n";
-  int result = RUN_ALL_TESTS();
-    std::cout << "D\n";
-  return result;
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
 }

@@ -39,35 +39,60 @@
 #include <limits>
 
 // TODO(henning): Re-include when this is available, until then the headers content is copied below
-// TODO(sjahr): Current implementation does not offer the desired API (08/2021). Use draft from dstogl instead
-// (https://github.com/ros-controls/ros2_control/pull/462/files) #include <joint_limits_interface/joint_limits_rosparam.hpp>
+// TODO(sjahr): Current implementation does not offer the desired API (08/2021). Use draft from dstogl instead but with
+// slight modifications (https://github.com/ros-controls/ros2_control/pull/462/files)
+// #include <joint_limits_interface/joint_limits_rosparam.hpp>
 //////////////////////////////////////////////////////////////
 // start of <joint_limits_interface/joint_limits_rosparam.hpp>
 namespace joint_limits_interface
 {
-inline bool declare_parameters(const std::string& joint_name, const rclcpp::Node::SharedPtr& node)
+template <typename T>
+bool declare_parameter(const rclcpp::Node::SharedPtr& node, const std::string& parameter_name, T default_value)
 {
-  const std::string param_base_name = "joint_limits." + joint_name;
   try
   {
-    node->declare_parameter<bool>(param_base_name + ".has_position_limits", false);
-    node->declare_parameter<double>(param_base_name + ".min_position", std::numeric_limits<double>::quiet_NaN());
-    node->declare_parameter<double>(param_base_name + ".max_position", std::numeric_limits<double>::quiet_NaN());
-    node->declare_parameter<bool>(param_base_name + ".has_velocity_limits", false);
-    node->declare_parameter<double>(param_base_name + ".min_velocity", std::numeric_limits<double>::quiet_NaN());
-    node->declare_parameter<double>(param_base_name + ".max_velocity", std::numeric_limits<double>::quiet_NaN());
-    node->declare_parameter<bool>(param_base_name + ".has_acceleration_limits", false);
-    node->declare_parameter<double>(param_base_name + ".max_acceleration", std::numeric_limits<double>::quiet_NaN());
-    node->declare_parameter<bool>(param_base_name + ".has_jerk_limits", false);
-    node->declare_parameter<double>(param_base_name + ".max_jerk", std::numeric_limits<double>::quiet_NaN());
-    node->declare_parameter<bool>(param_base_name + ".has_effort_limits", false);
-    node->declare_parameter<double>(param_base_name + ".max_effort", std::numeric_limits<double>::quiet_NaN());
-    node->declare_parameter<bool>(param_base_name + ".angle_wraparound", false);
-    node->declare_parameter<bool>(param_base_name + ".has_soft_limits", false);
-    node->declare_parameter<double>(param_base_name + ".k_position", std::numeric_limits<double>::quiet_NaN());
-    node->declare_parameter<double>(param_base_name + ".k_velocity", std::numeric_limits<double>::quiet_NaN());
-    node->declare_parameter<double>(param_base_name + ".soft_lower_limit", std::numeric_limits<double>::quiet_NaN());
-    node->declare_parameter<double>(param_base_name + ".soft_upper_limit", std::numeric_limits<double>::quiet_NaN());
+    if (!node->has_parameter(parameter_name))
+    {
+      node->declare_parameter<T>(parameter_name, default_value);
+    }
+    return true;
+  }
+  catch (const rclcpp::exceptions::InvalidParameterTypeException& e)
+  {
+    RCLCPP_WARN_STREAM(node->get_logger(), "InvalidParameterTypeException(" << parameter_name << "): " << e.what());
+    return false;
+  }
+}
+
+inline bool declare_parameters(const std::string& joint_name, const std::string& param_ns,
+                               const rclcpp::Node::SharedPtr& node)
+{
+  std::string param_base_name = "joint_limits." + joint_name;
+  if (param_ns != "")
+  {
+    param_base_name = param_ns + "." + param_base_name;
+  }
+
+  try
+  {
+    declare_parameter<bool>(node, param_base_name + ".has_position_limits", false);
+    declare_parameter<double>(node, param_base_name + ".min_position", std::numeric_limits<double>::quiet_NaN());
+    declare_parameter<double>(node, param_base_name + ".max_position", std::numeric_limits<double>::quiet_NaN());
+    declare_parameter<bool>(node, param_base_name + ".has_velocity_limits", false);
+    declare_parameter<double>(node, param_base_name + ".min_velocity", std::numeric_limits<double>::quiet_NaN());
+    declare_parameter<double>(node, param_base_name + ".max_velocity", std::numeric_limits<double>::quiet_NaN());
+    declare_parameter<bool>(node, param_base_name + ".has_acceleration_limits", false);
+    declare_parameter<double>(node, param_base_name + ".max_acceleration", std::numeric_limits<double>::quiet_NaN());
+    declare_parameter<bool>(node, param_base_name + ".has_jerk_limits", false);
+    declare_parameter<double>(node, param_base_name + ".max_jerk", std::numeric_limits<double>::quiet_NaN());
+    declare_parameter<bool>(node, param_base_name + ".has_effort_limits", false);
+    declare_parameter<double>(node, param_base_name + ".max_effort", std::numeric_limits<double>::quiet_NaN());
+    declare_parameter<bool>(node, param_base_name + ".angle_wraparound", false);
+    declare_parameter<bool>(node, param_base_name + ".has_soft_limits", false);
+    declare_parameter<double>(node, param_base_name + ".k_position", std::numeric_limits<double>::quiet_NaN());
+    declare_parameter<double>(node, param_base_name + ".k_velocity", std::numeric_limits<double>::quiet_NaN());
+    declare_parameter<double>(node, param_base_name + ".soft_lower_limit", std::numeric_limits<double>::quiet_NaN());
+    declare_parameter<double>(node, param_base_name + ".soft_upper_limit", std::numeric_limits<double>::quiet_NaN());
   }
   catch (const std::exception& ex)
   {
@@ -106,14 +131,20 @@ inline bool declare_parameters(const std::string& joint_name, const rclcpp::Node
  *
  * \param[in] joint_name Name of joint whose limits are to be fetched.
  * \param[in] node NodeHandle where the joint limits are specified.
- * \param[out] limits Where joint limit data gets written into. Limits specified in the node parameters will overwrite
- * existing values. Values in \p limits not specified in the node parameters remain unchanged.
- * \return True if a limits specification is found (ie. the \p joint_limits/joint_name parameter exists in \p node),
- * false otherwise.
+ * \param[in] param_ns Parameter namespace of the joint i.e. robot_description_planning/ TODO(sjahr): Add API change
+ * upstream \param[out] limits Where joint limit data gets written into. Limits specified in the node parameters will
+ * overwrite existing values. Values in \p limits not specified in the node parameters remain unchanged. \return True if
+ * a limits specification is found (ie. the \p joint_limits/joint_name parameter exists in \p node), false otherwise.
  */
-inline bool getJointLimits(const std::string& joint_name, const rclcpp::Node::SharedPtr& node, JointLimits& limits)
+inline bool getJointLimits(const std::string& joint_name, const std::string& param_ns,
+                           const rclcpp::Node::SharedPtr& node, JointLimits& limits)
 {
-  const std::string param_base_name = "joint_limits." + joint_name;
+  std::string param_base_name = "joint_limits." + joint_name;
+  if (param_ns != "")
+  {
+    param_base_name = param_ns + "." + param_base_name;
+  }
+
   try
   {
     if (!node->has_parameter(param_base_name + ".has_position_limits") &&
@@ -254,10 +285,15 @@ inline bool getJointLimits(const std::string& joint_name, const rclcpp::Node::Sh
  * \p k_velocity, \p soft_lower_limit and \p soft_upper_limit exist in \p joint_limits/joint_name namespace), false
  * otherwise.
  */
-inline bool getSoftJointLimits(const std::string& joint_name, const rclcpp::Node::SharedPtr& node,
-                               SoftJointLimits& soft_limits)
+inline bool getSoftJointLimits(const std::string& joint_name, const std::string& param_ns,
+                               const rclcpp::Node::SharedPtr& node, SoftJointLimits& soft_limits)
 {
-  const std::string param_base_name = "joint_limits." + joint_name;
+  std::string param_base_name = "joint_limits." + joint_name;
+  if (param_ns != "")
+  {
+    param_base_name = param_ns + "." + param_base_name;
+  }
+
   try
   {
     if (!node->has_parameter(param_base_name + ".has_soft_limits") &&
@@ -310,11 +346,11 @@ namespace joint_limits_interface
 /**
  * @see joint_limits_inteface::getJointLimits(...)
  */
-inline bool getJointLimits(const std::string& joint_name, const rclcpp::Node::SharedPtr& node,
-                           joint_limits_interface::JointLimits& limits)
+inline bool getJointLimits(const std::string& joint_name, const std::string& param_ns,
+                           const rclcpp::Node::SharedPtr& node, joint_limits_interface::JointLimits& limits)
 {
   // Set the existing limits
-  if (!::joint_limits_interface::getJointLimits(joint_name, node, limits))
+  if (!::joint_limits_interface::getJointLimits(joint_name, param_ns, node, limits))
   {
     return false;  // LCOV_EXCL_LINE // The case where getJointLimits returns
                    // false is covered above.
@@ -322,12 +358,17 @@ inline bool getJointLimits(const std::string& joint_name, const rclcpp::Node::Sh
   try
   {
     // Deceleration limits
-    const std::string limits_namespace = "joint_limits." + joint_name;
-    limits.has_deceleration_limits = node->declare_parameter(limits_namespace + ".has_deceleration_limits", false);
+    std::string param_base_name = "joint_limits." + joint_name;
+    if (param_ns != "")
+    {
+      param_base_name = param_ns + "." + param_base_name;
+    }
+
+    limits.has_deceleration_limits = node->declare_parameter(param_base_name + ".has_deceleration_limits", false);
     if (limits.has_deceleration_limits)
     {
       limits.max_deceleration =
-          node->declare_parameter(limits_namespace + ".max_deceleration", std::numeric_limits<double>::quiet_NaN());
+          node->declare_parameter(param_base_name + ".max_deceleration", std::numeric_limits<double>::quiet_NaN());
     }
   }
   catch (const std::exception& ex)

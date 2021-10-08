@@ -35,8 +35,6 @@
 #include <boost/core/demangle.hpp>
 #include <gtest/gtest.h>
 
-#include <moveit_msgs/MoveItErrorCodes.h>
-
 #include <moveit/planning_interface/planning_interface.h>
 
 #include <moveit/kinematic_constraints/utils.h>
@@ -50,9 +48,6 @@
 #include "pilz_industrial_motion_planner/planning_context_ptp.h"
 
 #include "test_utils.h"
-
-const std::string PARAM_MODEL_NO_GRIPPER_NAME{ "robot_description" };
-const std::string PARAM_MODEL_WITH_GRIPPER_NAME{ "robot_description_pg70" };
 
 // parameters from parameter server
 const std::string PARAM_PLANNING_GROUP_NAME("planning_group");
@@ -94,11 +89,23 @@ class PlanningContextTest : public ::testing::Test
 protected:
   void SetUp() override
   {
+    rclcpp::NodeOptions node_options;
+    node_options.automatically_declare_parameters_from_overrides(true);
+    node_ = rclcpp::Node::make_shared("unittest_planning_context", node_options);
+
+    // load robot model
+    rdf_loader::RDFLoader rdf_loader(node_, "robot_description");
+    moveit::core::RobotModelConstPtr robot_model_ =
+        std::make_shared<moveit::core::RobotModel>(rdf_loader.getURDF(), rdf_loader.getSRDF());
+
     ASSERT_FALSE(robot_model_ == nullptr) << "There is no robot model!";
 
     // get parameters
-    ASSERT_TRUE(ph_.getParam(PARAM_PLANNING_GROUP_NAME, planning_group_));
-    ASSERT_TRUE(ph_.getParam(PARAM_TARGET_LINK_NAME, target_link_));
+    ASSERT_TRUE(node_->has_parameter(PARAM_PLANNING_GROUP_NAME)) << "Could not find parameter 'planning_group'";
+    node_->get_parameter<std::string>(PARAM_PLANNING_GROUP_NAME, planning_group_);
+
+    ASSERT_TRUE(node_->has_parameter(PARAM_TARGET_LINK_NAME)) << "Could not find parameter 'target_link'";
+    node_->get_parameter<std::string>(PARAM_TARGET_LINK_NAME, target_link_);
 
     pilz_industrial_motion_planner::JointLimitsContainer joint_limits =
         testutils::createFakeLimits(robot_model_->getVariableNames());
@@ -117,7 +124,7 @@ protected:
 
     // Define and set the current scene
     planning_scene::PlanningScenePtr scene(new planning_scene::PlanningScene(robot_model_));
-    robot_state::RobotState current_state(robot_model_);
+    moveit::core::RobotState current_state(robot_model_);
     current_state.setToDefaultValues();
     current_state.setJointGroupPositions(planning_group_, { 0, 1.57, 1.57, 0, 0.2, 0 });
     scene->setCurrentState(current_state);
@@ -138,7 +145,7 @@ protected:
     req.max_acceleration_scaling_factor = 0.01;
 
     // start state
-    robot_state::RobotState rstate(this->robot_model_);
+    moveit::core::RobotState rstate(this->robot_model_);
     rstate.setToDefaultValues();
     // state state in joint space, used as initial positions, since IK does not
     // work at zero positions
@@ -162,9 +169,9 @@ protected:
 
     // path constraint
     req.path_constraints.name = "center";
-    moveit_msgs::PositionConstraint center_point;
+    moveit_msgs::msg::PositionConstraint center_point;
     center_point.link_name = this->target_link_;
-    geometry_msgs::Pose center_position;
+    geometry_msgs::msg::Pose center_position;
     center_position.position.x = 0.0;
     center_position.position.y = 0.0;
     center_position.position.z = 0.65;
@@ -176,11 +183,8 @@ protected:
 
 protected:
   // ros stuff
-  ros::NodeHandle ph_{ "~" };
-  robot_model::RobotModelConstPtr robot_model_{
-    robot_model_loader::RobotModelLoader(!T::VALUE ? PARAM_MODEL_NO_GRIPPER_NAME : PARAM_MODEL_WITH_GRIPPER_NAME)
-        .getModel()
-  };
+  rclcpp::Node::SharedPtr node_;
+  moveit::core::RobotModelConstPtr robot_model_;
 
   std::unique_ptr<planning_interface::PlanningContext> planning_context_;
 
@@ -275,8 +279,7 @@ TYPED_TEST(PlanningContextTest, Clear)
 
 int main(int argc, char** argv)
 {
-  ros::init(argc, argv, "unittest_planning_context");
-  // ros::NodeHandle nh;
+  rclcpp::init(argc, argv);
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

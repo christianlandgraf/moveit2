@@ -3,6 +3,7 @@ find_package(ament_cmake_gmock REQUIRED)
 find_package(ros_testing REQUIRED)
 find_package(moveit_resources_prbt_support REQUIRED)
 find_package(moveit_resources_prbt_moveit_config REQUIRED)
+find_package(Boost REQUIRED thread)
 
 find_package(${PROJECT_NAME}_testutils REQUIRED)
 
@@ -29,3 +30,5 @@ add_subdirectory(unit_tests)
 
 # Integration tests
 add_subdirectory(integration_tests)
+# Install test data
+install(DIRECTORY test_data DESTINATION share/${PROJECT_NAME})

@@ -45,9 +45,7 @@
 #include <moveit/robot_model_loader/robot_model_loader.h>
 #include <pluginlib/class_loader.hpp>
 
-// parameters for parameterized tests
-const std::string PARAM_MODEL_NO_GRIPPER_NAME{ "robot_description" };
-const std::string PARAM_MODEL_WITH_GRIPPER_NAME{ "robot_description_pg70" };
+#include "rclcpp/rclcpp.hpp"
 
 // parameters from parameter server
 const std::string PARAM_PLANNING_GROUP_NAME("planning_group");
@@ -59,14 +57,66 @@ const std::string POSE_TRANSFORM_MATRIX_NORM_TOLERANCE("pose_norm_tolerance");
 
 using namespace pilz_industrial_motion_planner;
 
-class TrajectoryGeneratorPTPTest : public testing::TestWithParam<std::string>
+class TrajectoryGeneratorPTPTest : public testing::Test
 {
 protected:
   /**
    * @brief Create test fixture for ptp trajectory generator
    *
    */
-  void SetUp() override;
+  void SetUp() override
+  {
+    rclcpp::NodeOptions node_options;
+    node_options.automatically_declare_parameters_from_overrides(true);
+    node_ = rclcpp::Node::make_shared("unittest_trajectory_generator_ptp", node_options);
+
+    // load robot model
+    rdf_loader::RDFLoader rdf_loader(node_, "robot_description");
+    moveit::core::RobotModelConstPtr robot_model_ =
+        std::make_shared<moveit::core::RobotModel>(rdf_loader.getURDF(), rdf_loader.getSRDF());
+    ASSERT_TRUE(bool(robot_model_)) << "Failed to load robot model";
+
+    // get parameters from parameter server
+    ASSERT_TRUE(node_->has_parameter("planning_group"));
+    node_->get_parameter<std::string>("planning_group", planning_group_);
+    ASSERT_TRUE(node_->has_parameter("target_link"));
+    node_->get_parameter<std::string>("target_link", target_link_);
+    ASSERT_TRUE(node_->has_parameter("joint_position_tolerance"));
+    node_->get_parameter<double>("joint_position_tolerance", joint_position_tolerance_);
+    ASSERT_TRUE(node_->has_parameter("joint_velocity_tolerance"));
+    node_->get_parameter<double>("joint_velocity_tolerance", joint_velocity_tolerance_);
+    ASSERT_TRUE(node_->has_parameter("joint_acceleration_tolerance"));
+    node_->get_parameter<double>("joint_acceleration_tolerance", joint_acceleration_tolerance_);
+    ASSERT_TRUE(node_->has_parameter("pose_norm_tolerance"));
+    node_->get_parameter<double>("pose_norm_tolerance", pose_norm_tolerance_);
+
+    testutils::checkRobotModel(robot_model_, planning_group_, target_link_);
+
+    // create the limits container
+    JointLimitsContainer joint_limits;
+    for (const auto& jmg : robot_model_->getJointModelGroups())
+    {
+      std::vector<std::string> joint_names = jmg->getActiveJointModelNames();
+      JointLimit joint_limit;
+      joint_limit.max_position = 3.124;
+      joint_limit.min_position = -3.124;
+      joint_limit.has_velocity_limits = true;
+      joint_limit.max_velocity = 1;
+      joint_limit.has_acceleration_limits = true;
+      joint_limit.max_acceleration = 0.5;
+      joint_limit.has_deceleration_limits = true;
+      joint_limit.max_deceleration = -1;
+      for (const auto& joint_name : joint_names)
+      {
+        joint_limits.addLimit(joint_name, joint_limit);
+      }
+    }
+
+    // create the trajectory generator
+    planner_limits_.setJointLimits(joint_limits);
+    ptp_.reset(new TrajectoryGeneratorPTP(robot_model_, planner_limits_));
+    ASSERT_NE(nullptr, ptp_);
+  }
 
   /**
    * @brief check the resulted joint trajectory
@@ -75,13 +125,21 @@ protected:
    * @param joint_limits
    * @return
    */
-  bool checkTrajectory(const trajectory_msgs::JointTrajectory& trajectory,
-                       const planning_interface::MotionPlanRequest& req, const JointLimitsContainer& joint_limits);
+  bool checkTrajectory(const trajectory_msgs::msg::JointTrajectory& trajectory,
+                       const planning_interface::MotionPlanRequest& req, const JointLimitsContainer& joint_limits)
+  {
+    return (testutils::isTrajectoryConsistent(trajectory) &&
+            testutils::isGoalReached(trajectory, req.goal_constraints.front().joint_constraints,
+                                     joint_position_tolerance_, joint_velocity_tolerance_) &&
+            testutils::isPositionBounded(trajectory, joint_limits) &&
+            testutils::isVelocityBounded(trajectory, joint_limits) &&
+            testutils::isAccelerationBounded(trajectory, joint_limits));
+  }
 
 protected:
   // ros stuff
-  ros::NodeHandle ph_{ "~" };
-  robot_model::RobotModelConstPtr robot_model_{ robot_model_loader::RobotModelLoader(GetParam()).getModel() };
+  rclcpp::Node::SharedPtr node_;
+  moveit::core::RobotModelConstPtr robot_model_;
 
   // trajectory generator
   std::unique_ptr<TrajectoryGenerator> ptp_;
@@ -92,61 +150,11 @@ protected:
   double joint_position_tolerance_, joint_velocity_tolerance_, joint_acceleration_tolerance_, pose_norm_tolerance_;
 };
 
-void TrajectoryGeneratorPTPTest::SetUp()
-{
-  // get parameters from parameter server
-  ASSERT_TRUE(ph_.getParam(PARAM_PLANNING_GROUP_NAME, planning_group_));
-  ASSERT_TRUE(ph_.getParam(PARAM_TARGET_LINK_NAME, target_link_));
-  ASSERT_TRUE(ph_.getParam(JOINT_POSITION_TOLERANCE, joint_position_tolerance_));
-  ASSERT_TRUE(ph_.getParam(JOINT_VELOCITY_TOLERANCE, joint_velocity_tolerance_));
-  ASSERT_TRUE(ph_.getParam(JOINT_ACCELERATION_TOLERANCE, joint_acceleration_tolerance_));
-  ASSERT_TRUE(ph_.getParam(POSE_TRANSFORM_MATRIX_NORM_TOLERANCE, pose_norm_tolerance_));
-
-  testutils::checkRobotModel(robot_model_, planning_group_, target_link_);
-
-  // create the limits container
-  JointLimitsContainer joint_limits;
-  for (const auto& jmg : robot_model_->getJointModelGroups())
-  {
-    std::vector<std::string> joint_names = jmg->getActiveJointModelNames();
-    JointLimit joint_limit;
-    joint_limit.max_position = 3.124;
-    joint_limit.min_position = -3.124;
-    joint_limit.has_velocity_limits = true;
-    joint_limit.max_velocity = 1;
-    joint_limit.has_acceleration_limits = true;
-    joint_limit.max_acceleration = 0.5;
-    joint_limit.has_deceleration_limits = true;
-    joint_limit.max_deceleration = -1;
-    for (const auto& joint_name : joint_names)
-    {
-      joint_limits.addLimit(joint_name, joint_limit);
-    }
-  }
-
-  // create the trajectory generator
-  planner_limits_.setJointLimits(joint_limits);
-  ptp_.reset(new TrajectoryGeneratorPTP(robot_model_, planner_limits_));
-  ASSERT_NE(nullptr, ptp_);
-}
-
-bool TrajectoryGeneratorPTPTest::checkTrajectory(const trajectory_msgs::JointTrajectory& trajectory,
-                                                 const planning_interface::MotionPlanRequest& req,
-                                                 const JointLimitsContainer& joint_limits)
-{
-  return (testutils::isTrajectoryConsistent(trajectory) &&
-          testutils::isGoalReached(trajectory, req.goal_constraints.front().joint_constraints,
-                                   joint_position_tolerance_, joint_velocity_tolerance_) &&
-          testutils::isPositionBounded(trajectory, joint_limits) &&
-          testutils::isVelocityBounded(trajectory, joint_limits) &&
-          testutils::isAccelerationBounded(trajectory, joint_limits));
-}
-
 /**
  * @brief Checks that each derived MoveItErrorCodeException contains the correct
  * error code.
  */
-TEST(TrajectoryGeneratorPTPTest, TestExceptionErrorCodeMapping)
+TEST_F(TrajectoryGeneratorPTPTest, TestExceptionErrorCodeMapping)
 {
   {
     std::shared_ptr<PtpVelocityProfileSyncFailed> pvpsf_ex{ new PtpVelocityProfileSyncFailed("") };
@@ -159,13 +167,10 @@ TEST(TrajectoryGeneratorPTPTest, TestExceptionErrorCodeMapping)
   }
 }
 
-// Instantiate the test cases for robot model with and without gripper
-INSTANTIATE_TEST_SUITE_P(InstantiationName, TrajectoryGeneratorPTPTest,
-                         ::testing::Values(PARAM_MODEL_NO_GRIPPER_NAME, PARAM_MODEL_WITH_GRIPPER_NAME));
 /**
  * @brief Construct a TrajectoryGeneratorPTP with no limits given
  */
-TEST_P(TrajectoryGeneratorPTPTest, noLimits)
+TEST_F(TrajectoryGeneratorPTPTest, noLimits)
 {
   LimitsContainer planner_limits;
   EXPECT_THROW(TrajectoryGeneratorPTP(this->robot_model_, planner_limits), TrajectoryGeneratorInvalidLimitsException);
@@ -181,14 +186,14 @@ TEST_P(TrajectoryGeneratorPTPTest, noLimits)
  *  - Expected Results:
  *    1. the res.trajectory_ should be cleared (contain no waypoints)
  */
-TEST_P(TrajectoryGeneratorPTPTest, emptyRequest)
+TEST_F(TrajectoryGeneratorPTPTest, emptyRequest)
 {
   planning_interface::MotionPlanResponse res;
   planning_interface::MotionPlanRequest req;
 
   robot_trajectory::RobotTrajectoryPtr trajectory(
       new robot_trajectory::RobotTrajectory(this->robot_model_, planning_group_));
-  robot_state::RobotState state(this->robot_model_);
+  moveit::core::RobotState state(this->robot_model_);
   trajectory->addPrefixWayPoint(state, 0);
   res.trajectory_ = trajectory;
 
@@ -202,7 +207,7 @@ TEST_P(TrajectoryGeneratorPTPTest, emptyRequest)
 /**
  * @brief Construct a TrajectoryGeneratorPTP with missing velocity limits
  */
-TEST_P(TrajectoryGeneratorPTPTest, missingVelocityLimits)
+TEST_F(TrajectoryGeneratorPTPTest, missingVelocityLimits)
 {
   LimitsContainer planner_limits;
 
@@ -226,7 +231,7 @@ TEST_P(TrajectoryGeneratorPTPTest, missingVelocityLimits)
 /**
  * @brief Construct a TrajectoryGeneratorPTP missing deceleration limits
  */
-TEST_P(TrajectoryGeneratorPTPTest, missingDecelerationimits)
+TEST_F(TrajectoryGeneratorPTPTest, missingDecelerationimits)
 {
   LimitsContainer planner_limits;
 
@@ -257,7 +262,7 @@ TEST_P(TrajectoryGeneratorPTPTest, missingDecelerationimits)
  * TrajectoryGeneratorInvalidLimitsException
  *    2. the constructor throws no exception
  */
-TEST_P(TrajectoryGeneratorPTPTest, testInsufficientLimit)
+TEST_F(TrajectoryGeneratorPTPTest, testInsufficientLimit)
 {
   /**********/
   /* Step 1 */
@@ -332,7 +337,7 @@ TEST_P(TrajectoryGeneratorPTPTest, testInsufficientLimit)
 /**
  * @brief test the ptp trajectory generator of Cartesian space goal
  */
-TEST_P(TrajectoryGeneratorPTPTest, testCartesianGoal)
+TEST_F(TrajectoryGeneratorPTPTest, testCartesianGoal)
 {
   //***************************************
   //*** prepare the motion plan request ***
@@ -342,7 +347,7 @@ TEST_P(TrajectoryGeneratorPTPTest, testCartesianGoal)
   testutils::createDummyRequest(robot_model_, planning_group_, req);
 
   // cartesian goal pose
-  geometry_msgs::PoseStamped pose;
+  geometry_msgs::msg::PoseStamped pose;
   pose.pose.position.x = 0.1;
   pose.pose.position.y = 0.2;
   pose.pose.position.z = 0.65;
@@ -381,7 +386,7 @@ TEST_P(TrajectoryGeneratorPTPTest, testCartesianGoal)
  * @brief Check that missing a link_name in position or orientation constraints
  * is detected
  */
-TEST_P(TrajectoryGeneratorPTPTest, testCartesianGoalMissingLinkNameConstraints)
+TEST_F(TrajectoryGeneratorPTPTest, testCartesianGoalMissingLinkNameConstraints)
 {
   //***************************************
   //*** prepare the motion plan request ***
@@ -391,7 +396,7 @@ TEST_P(TrajectoryGeneratorPTPTest, testCartesianGoalMissingLinkNameConstraints)
   testutils::createDummyRequest(robot_model_, planning_group_, req);
 
   // cartesian goal pose
-  geometry_msgs::PoseStamped pose;
+  geometry_msgs::msg::PoseStamped pose;
   pose.pose.position.x = 0.1;
   pose.pose.position.y = 0.2;
   pose.pose.position.z = 0.65;
@@ -419,13 +424,13 @@ TEST_P(TrajectoryGeneratorPTPTest, testCartesianGoalMissingLinkNameConstraints)
 /**
  * @brief test the ptp trajectory generator of invalid Cartesian space goal
  */
-TEST_P(TrajectoryGeneratorPTPTest, testInvalidCartesianGoal)
+TEST_F(TrajectoryGeneratorPTPTest, testInvalidCartesianGoal)
 {
   planning_interface::MotionPlanResponse res;
   planning_interface::MotionPlanRequest req;
   testutils::createDummyRequest(robot_model_, planning_group_, req);
 
-  geometry_msgs::PoseStamped pose;
+  geometry_msgs::msg::PoseStamped pose;
   pose.pose.position.x = 0.1;
   pose.pose.position.y = 0.2;
   pose.pose.position.z = 2.5;
@@ -449,7 +454,7 @@ TEST_P(TrajectoryGeneratorPTPTest, testInvalidCartesianGoal)
  * enough to the start which does not need
  * to plan the trajectory
  */
-TEST_P(TrajectoryGeneratorPTPTest, testJointGoalAlreadyReached)
+TEST_F(TrajectoryGeneratorPTPTest, testJointGoalAlreadyReached)
 {
   planning_interface::MotionPlanResponse res;
   planning_interface::MotionPlanRequest req;
@@ -477,7 +482,7 @@ TEST_P(TrajectoryGeneratorPTPTest, testJointGoalAlreadyReached)
  * @brief test scaling factor
  * with zero start velocity
  */
-TEST_P(TrajectoryGeneratorPTPTest, testScalingFactor)
+TEST_F(TrajectoryGeneratorPTPTest, testScalingFactor)
 {
   // create ptp generator with different limits
   JointLimit joint_limit;
@@ -641,7 +646,7 @@ TEST_P(TrajectoryGeneratorPTPTest, testScalingFactor)
  * @brief test the ptp trajectory generator of joint space goal
  * with (almost) zero start velocity
  */
-TEST_P(TrajectoryGeneratorPTPTest, testJointGoalAndAlmostZeroStartVelocity)
+TEST_F(TrajectoryGeneratorPTPTest, testJointGoalAndAlmostZeroStartVelocity)
 {
   planning_interface::MotionPlanResponse res;
   planning_interface::MotionPlanRequest req;
@@ -778,7 +783,7 @@ TEST_P(TrajectoryGeneratorPTPTest, testJointGoalAndAlmostZeroStartVelocity)
  * @brief test the ptp_ trajectory generator of joint space goal
  * with zero start velocity
  */
-TEST_P(TrajectoryGeneratorPTPTest, testJointGoalNoStartVel)
+TEST_F(TrajectoryGeneratorPTPTest, testJointGoalNoStartVel)
 {
   planning_interface::MotionPlanResponse res;
   planning_interface::MotionPlanRequest req;
@@ -964,8 +969,7 @@ TEST_P(TrajectoryGeneratorPTPTest, testJointGoalNoStartVel)
 
 int main(int argc, char** argv)
 {
-  ros::init(argc, argv, "unittest_trajectory_generator_ptp");
-  ros::NodeHandle nh;
+  rclcpp::init(argc, argv);
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
