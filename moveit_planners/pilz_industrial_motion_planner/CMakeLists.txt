@@ -213,7 +213,7 @@ ament_export_targets(export_${PROJECT_NAME})
 ament_export_dependencies(${THIS_PACKAGE_INCLUDE_DEPENDS})
 
 if(BUILD_TESTING)
-  add_subdirectory(test)
+  # add_subdirectory(test)
 #  find_package(ament_lint_auto REQUIRED)
 #
 # These don't pass yet, disable them for now
